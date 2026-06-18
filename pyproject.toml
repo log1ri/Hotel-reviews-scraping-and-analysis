@@ -1,0 +1,19 @@
+[project]
+name = "hotel-reviews-scraping-and-analysis"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+    "apify-client>=3.0.2",
+    "ipykernel>=7.3.0",
+    "matplotlib>=3.11.0",
+    "openpyxl>=3.1.5",
+    "pandas>=3.0.3",
+    "python-dotenv>=1.2.2",
+]
+
+[dependency-groups]
+dev = [
+    "pylint>=4.0.6",
+]
