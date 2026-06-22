@@ -18,29 +18,29 @@ def default_start_date(lookback_months: int) -> str:
     year, month = divmod(idx, 12)
     return f"{year:04d}-{month + 1:02d}-01"
 
+def _get_int(name: str, default: int) -> int:
+    val = os.getenv(name, str(default))
+    try:
+        return int(val)
+    except ValueError as exc:
+        raise SystemExit(f"{name} must be an integer (got {val!r})") from exc
 
 # Load configuration from environment variables, with some defaults and validation.
 def get_config() -> dict:
     """Load and validate runtime configuration from environment variables."""
     
-    hotel_urls = [url.strip() for url in os.getenv("HOTEL_URLS", "").split(",") if url.strip()]
     api_token = os.getenv("API_TOKEN")
-
-    def _get_int(name: str, default: int) -> int:
-        val = os.getenv(name, str(default))
-        try:
-            return int(val)
-        except ValueError as exc:
-            raise SystemExit(f"{name} must be an integer (got {val!r})") from exc
-
+    
+    hotel_urls = [url.strip() for url in os.getenv("HOTEL_URLS", "").split(",") if url.strip()]
+    rating_set = [r.strip() for r in os.getenv("RATING_SET", "5,4,3,2,1").split(",") if r.strip()]
+    languages = [l.strip() for l in os.getenv("LANGUAGE", "en").split(",") if l.strip()]
+    
     lookback_months = _get_int("LOOKBACK_MONTHS", 2)
+    start_date = os.getenv("START_DATE", default_start_date(lookback_months))
     max_items = _get_int("MAX_ITEMS", 1000)
 
     if not hotel_urls or not api_token:
         raise SystemExit("HOTEL_URLS (comma-separated) and API_TOKEN must be set in the environment")
-
-    rating_set = [r.strip() for r in os.getenv("RATING_SET", "5,4,3,2,1").split(",") if r.strip()]
-    start_date = os.getenv("START_DATE", default_start_date(lookback_months))
 
     return {
         "api_token": api_token,
@@ -48,7 +48,7 @@ def get_config() -> dict:
         "rating_set": rating_set,
         "start_date": start_date,
         "max_items": max_items,
-        "language": os.getenv("LANGUAGE", "en"),
+        "languages": languages,
     }
     
 # Extract hotel name from the TripAdvisor URL for better logging and output.
@@ -69,7 +69,7 @@ def scrape_hotel(client: ApifyClient, url: str, cfg: dict) -> list[dict]:
         "scrapeReviewerInfo": True,
         "lastReviewDate": cfg["start_date"],
         "reviewRatings": cfg["rating_set"],
-        "reviewsLanguages": [cfg["language"]],     # Preferred language
+        "reviewsLanguages": cfg["languages"],     # Preferred languages
     }
     
     run = client.actor("maxcopell/tripadvisor-reviews").call(run_input=run_input, logger=None)
@@ -125,6 +125,7 @@ def main():
 
     df = build_dataframe(all_rows)
     log.info("Total %d reviews across %d hotels", len(df), len(cfg["hotel_urls"]))
+    
     # Phase 2: load_to_bigquery(df, cfg)
 
 if __name__ == "__main__":
