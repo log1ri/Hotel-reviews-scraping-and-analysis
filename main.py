@@ -29,19 +29,27 @@ def _get_int(name: str, default: int) -> int:
 def get_config() -> dict:
     """Load and validate runtime configuration from environment variables."""
     
+    # Apify settings
     api_token = os.getenv("API_TOKEN")
-    
     hotel_urls = [url.strip() for url in os.getenv("HOTEL_URLS", "").split(",") if url.strip()]
     rating_set = [r.strip() for r in os.getenv("RATING_SET", "5,4,3,2,1").split(",") if r.strip()]
     languages = [l.strip() for l in os.getenv("LANGUAGE", "en").split(",") if l.strip()]
-    
     lookback_months = _get_int("LOOKBACK_MONTHS", 2)
     start_date = os.getenv("START_DATE", default_start_date(lookback_months))
     max_items = _get_int("MAX_ITEMS", 1000)
 
+    # BigQuery settings
+    gcp_project_id = os.getenv("GCP_PROJECT_ID")
+    bq_dataset = os.getenv("BQ_DATASET")
+    bq_table = os.getenv("BQ_TABLE")
+    bq_location = os.getenv("BQ_LOCATION", "asia-southeast3")
+    google_application_credentials = os.getenv("GOOGLE_APPLICATION_CREDENTIALS")
+
     if not hotel_urls or not api_token:
         raise SystemExit("HOTEL_URLS (comma-separated) and API_TOKEN must be set in the environment")
-
+    if not all([gcp_project_id, bq_dataset, bq_table]):
+        raise SystemExit("GCP_PROJECT_ID, BQ_DATASET, BQ_TABLE must be set in the environment")
+    
     return {
         "api_token": api_token,
         "hotel_urls": hotel_urls,
@@ -49,6 +57,11 @@ def get_config() -> dict:
         "start_date": start_date,
         "max_items": max_items,
         "languages": languages,
+        "gcp_project_id": gcp_project_id,
+        "bq_dataset": bq_dataset,
+        "bq_table": bq_table,
+        "bq_location": bq_location,
+        "google_application_credentials": google_application_credentials,
     }
     
 # Extract hotel name from the TripAdvisor URL for better logging and output.
