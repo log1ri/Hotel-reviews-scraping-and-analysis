@@ -1,6 +1,6 @@
 import os, re, logging, datetime, hashlib, pandas as pd
 from apify_client import ApifyClient
-from dotenv import load_dotenv 
+from dotenv import load_dotenv
 
 # Load environment variables and set up logging.
 load_dotenv()
@@ -23,19 +23,31 @@ def default_start_date(lookback_months: int) -> str:
 def get_config() -> dict:
     """Load and validate runtime configuration from environment variables."""
     
-    HOTEL_URLS = [url.strip() for url in os.getenv("HOTEL_URLS", "").split(",") if url.strip()]
-    API_TOKEN = os.getenv("API_TOKEN")
-    LOOKBACK_MONTHS = int(os.getenv("LOOKBACK_MONTHS", "2"))
-    
-    if HOTEL_URLS == [] or not API_TOKEN:
-        raise SystemExit("HOTEL_URLS or API_TOKEN is empty — ...")
-    
+    hotel_urls = [url.strip() for url in os.getenv("HOTEL_URLS", "").split(",") if url.strip()]
+    api_token = os.getenv("API_TOKEN")
+
+    def _get_int(name: str, default: int) -> int:
+        val = os.getenv(name, str(default))
+        try:
+            return int(val)
+        except ValueError as exc:
+            raise SystemExit(f"{name} must be an integer (got {val!r})") from exc
+
+    lookback_months = _get_int("LOOKBACK_MONTHS", 2)
+    max_items = _get_int("MAX_ITEMS", 1000)
+
+    if not hotel_urls or not api_token:
+        raise SystemExit("HOTEL_URLS (comma-separated) and API_TOKEN must be set in the environment")
+
+    rating_set = [r.strip() for r in os.getenv("RATING_SET", "5,4,3,2,1").split(",") if r.strip()]
+    start_date = os.getenv("START_DATE", default_start_date(lookback_months))
+
     return {
-        "api_token":  API_TOKEN,
-        "hotel_urls": HOTEL_URLS,
-        "rating_set": os.getenv("RATING_SET", "5,4,3,2,1").split(","),
-        "start_date": os.getenv("START_DATE",default_start_date(LOOKBACK_MONTHS)),
-        "max_items": int(os.getenv("MAX_ITEMS", "1000")),
+        "api_token": api_token,
+        "hotel_urls": hotel_urls,
+        "rating_set": rating_set,
+        "start_date": start_date,
+        "max_items": max_items,
         "language": os.getenv("LANGUAGE", "en"),
     }
     
@@ -49,7 +61,7 @@ def hotel_name_from_url(url: str) -> str:
 # Scrape reviews for a single hotel using the Apify client and return them as a list of dictionaries.
 def scrape_hotel(client: ApifyClient, url: str, cfg: dict) -> list[dict]:
     hotel_name = hotel_name_from_url(url)
-    log.info("\nScraping: %s...", hotel_name)
+    log.info("Scraping: %s...", hotel_name)
     
     run_input = {
         "startUrls": [{ "url": url }],
@@ -87,11 +99,14 @@ def build_dataframe(all_rows: list[dict]) -> pd.DataFrame:
         log.warning("No reviews scraped — returning empty DataFrame")
         return df
 
-    def make_id(r):
-        raw = f"{r['page_url']}|{r['reviewer']}|{r['date_of_stay']}|{r['review_text']}"
+    def make_id(page_url, reviewer, date_of_stay, review_text):
+        raw = f"{page_url}|{reviewer}|{date_of_stay}|{review_text}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
-    df["review_id"] = df.apply(make_id, axis=1)
+    df["review_id"] = [
+        make_id(str(u), str(r), str(d), str(t))
+        for u, r, d, t in zip(df["page_url"], df["reviewer"], df["date_of_stay"], df["review_text"], strict=False)
+    ]
     df["scraped_at"] = pd.Timestamp.now(tz="UTC")
 
     return df
@@ -105,8 +120,8 @@ def main():
     for url in cfg["hotel_urls"]:
         try:
             all_rows += scrape_hotel(client, url, cfg)
-        except Exception as e:
-            log.error("Error scraping hotel %s: %s", url, e)
+        except Exception:
+            log.exception("Error scraping hotel %s", url)
 
     df = build_dataframe(all_rows)
     log.info("Total %d reviews across %d hotels", len(df), len(cfg["hotel_urls"]))
