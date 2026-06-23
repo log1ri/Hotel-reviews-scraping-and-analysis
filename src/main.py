@@ -9,10 +9,7 @@ log = logging.getLogger("hotel-scraper")
 
 
 def default_start_date(lookback_months: int) -> str:
-    """
-    First day of the month, N months ago.     
-    Example: If today is 2026-06 and lookback is 2 -> '2026-04-01'.
-    """
+    """Calculate the default start date for scraping reviews based on lookback months."""
     today = datetime.date.today()
     idx = (today.year * 12 + today.month - 1) - lookback_months
     year, month = divmod(idx, 12)
@@ -25,7 +22,6 @@ def _get_int(name: str, default: int) -> int:
     except ValueError as exc:
         raise SystemExit(f"{name} must be an integer (got {val!r})") from exc
 
-# Load configuration from environment variables, with some defaults and validation.
 def get_config() -> dict:
     """Load and validate runtime configuration from environment variables."""
     
@@ -64,15 +60,15 @@ def get_config() -> dict:
         "google_application_credentials": google_application_credentials,
     }
     
-# Extract hotel name from the TripAdvisor URL for better logging and output.
 def hotel_name_from_url(url: str) -> str:
+    """Extract hotel name from TripAdvisor URL."""
     match = re.search(r"-Reviews-(.+?)\.html", url)
     if not match:
         return url
     return match.group(1).replace("_", " ")
     
-# Scrape reviews for a single hotel using the Apify client and return them as a list of dictionaries.
 def scrape_hotel(client: ApifyClient, url: str, cfg: dict) -> list[dict]:
+    """Scrape reviews for a single hotel using the Apify TripAdvisor Reviews actor."""
     hotel_name = hotel_name_from_url(url)
     log.info("Scraping: %s...", hotel_name)
     
@@ -103,6 +99,7 @@ def scrape_hotel(client: ApifyClient, url: str, cfg: dict) -> list[dict]:
 
 
 def build_dataframe(all_rows: list[dict]) -> pd.DataFrame:
+    """Build a DataFrame from scraped reviews and add unique review IDs."""
     df = pd.DataFrame(all_rows, columns=[
         "hotel_name", "page_url", "reviewer", "review_title",
         "review_text", "date_of_stay", "rating",
@@ -123,6 +120,32 @@ def build_dataframe(all_rows: list[dict]) -> pd.DataFrame:
     df["scraped_at"] = pd.Timestamp.now(tz="UTC")
 
     return df
+
+def prepare_bigquery_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    """Prepare scraped reviews for BigQuery loading."""
+    if df.empty:
+        log.warning("No reviews scraped — returning empty DataFrame")
+        return df
+    
+    bq_df = df.drop_duplicates(subset=["review_id"]).copy()
+    
+    bq_df["date_of_stay"] = pd.to_datetime(bq_df["date_of_stay"], errors="coerce").dt.date
+    bq_df["date_of_stay"] = bq_df["date_of_stay"].where(pd.notna(bq_df["date_of_stay"]), None,)
+    bq_df["rating"] = pd.to_numeric(bq_df["rating"], errors="coerce").astype("Int64")
+    
+    return bq_df[
+        [
+            "review_id", 
+            "hotel_name", 
+            "page_url", 
+            "reviewer", 
+            "review_title",
+            "review_text", 
+            "date_of_stay", 
+            "rating", 
+            "scraped_at"   
+        ]
+    ]
 
 
 def main():
