@@ -1,6 +1,7 @@
-import os, re, logging, datetime, hashlib, pandas as pd
-from apify_client import ApifyClient
 from dotenv import load_dotenv
+from apify_client import ApifyClient
+from google.cloud import bigquery
+import os, re, logging, datetime, hashlib, pandas as pd
 
 # Load environment variables and set up logging.
 load_dotenv()
@@ -8,7 +9,7 @@ logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(mess
 log = logging.getLogger("hotel-scraper")
 
 
-def default_start_date(lookback_months: int) -> str:
+def default_post_date(lookback_months: int) -> str:
     """Calculate the default start date for scraping reviews based on lookback months."""
     today = datetime.date.today()
     idx = (today.year * 12 + today.month - 1) - lookback_months
@@ -31,7 +32,7 @@ def get_config() -> dict:
     rating_set = [r.strip() for r in os.getenv("RATING_SET", "5,4,3,2,1").split(",") if r.strip()]
     languages = [l.strip() for l in os.getenv("LANGUAGE", "en").split(",") if l.strip()]
     lookback_months = _get_int("LOOKBACK_MONTHS", 2)
-    start_date = os.getenv("START_DATE", default_start_date(lookback_months))
+    post_date = os.getenv("POST_DATE", default_post_date(lookback_months))
     max_items = _get_int("MAX_ITEMS", 1000)
 
     # BigQuery settings
@@ -50,7 +51,7 @@ def get_config() -> dict:
         "api_token": api_token,
         "hotel_urls": hotel_urls,
         "rating_set": rating_set,
-        "start_date": start_date,
+        "post_date": post_date,
         "max_items": max_items,
         "languages": languages,
         "gcp_project_id": gcp_project_id,
@@ -76,7 +77,7 @@ def scrape_hotel(client: ApifyClient, url: str, cfg: dict) -> list[dict]:
         "startUrls": [{ "url": url }],
         "maxItemsPerQuery": cfg["max_items"],
         "scrapeReviewerInfo": True,
-        "lastReviewDate": cfg["start_date"],
+        "lastReviewDate": cfg["post_date"],
         "reviewRatings": cfg["rating_set"],
         "reviewsLanguages": cfg["languages"],     # Preferred languages
     }
@@ -147,8 +148,38 @@ def prepare_bigquery_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         ]
     ]
 
+def load_to_bigquery(df: pd.DataFrame, cfg: dict) -> None:
+    """Load scraped reviews into BigQuery, merging with existing data."""
+    bq_df = prepare_bigquery_dataframe(df)
+    if bq_df.empty:
+        log.warning("No reviews to load into BigQuery — skipping load")
+        return
+    
+    client = bigquery.Client(project = cfg["gcp_project_id"],location = cfg["bq_location"],)
+    table_id = f"{cfg['gcp_project_id']}.{cfg['bq_dataset']}.{cfg['bq_table']}"
+    staging_table_id = f"{table_id}_staging"
+    
+    job_config = bigquery.LoadJobConfig(
+        write_disposition=bigquery.WriteDisposition.WRITE_TRUNCATE,
+    )
+    client.load_table_from_dataframe(bq_df, staging_table_id, job_config=job_config).result()
+    log.info("Loaded %d rows into staging table %s", len(bq_df), staging_table_id)
+    
+    merge_sql = f"""
+    MERGE `{table_id}` AS T
+    USING `{staging_table_id}` AS S
+    ON T.review_id = S.review_id
+    WHEN NOT MATCHED THEN
+        INSERT (review_id, hotel_name, page_url, reviewer, review_title, review_text, date_of_stay, rating, scraped_at)
+        VALUES (S.review_id, S.hotel_name, S.page_url, S.reviewer, S.review_title, S.review_text, S.date_of_stay, S.rating, S.scraped_at)
+    """
+    
+    client.query(merge_sql).result()
+    log.info("Merged data into table %s", table_id)
+
 
 def main():
+    # Phase 1: Scrape reviews from TripAdvisor using Apify
     cfg = get_config()
     client = ApifyClient(cfg["api_token"])
 
@@ -162,7 +193,8 @@ def main():
     df = build_dataframe(all_rows)
     log.info("Total %d reviews across %d hotels", len(df), len(cfg["hotel_urls"]))
     
-    # Phase 2: load_to_bigquery(df, cfg)
+    # Phase 2: Load data into BigQuery
+    load_to_bigquery(df, cfg)
 
 if __name__ == "__main__":
     main()
