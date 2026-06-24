@@ -1,6 +1,6 @@
 from dotenv import load_dotenv
-from apify_client import ApifyClient
 from google.cloud import bigquery
+from apify_client import ApifyClient
 import os, re, logging, datetime, hashlib, pandas as pd
 
 # Load environment variables and set up logging.
@@ -10,13 +10,14 @@ log = logging.getLogger("hotel-scraper")
 
 
 def default_post_date(lookback_months: int) -> str:
-    """Calculate the default start date for scraping reviews based on lookback months."""
+    """Return the first day of the month N months ago, used as the default POST_DATE filter."""
     today = datetime.date.today()
     idx = (today.year * 12 + today.month - 1) - lookback_months
     year, month = divmod(idx, 12)
     return f"{year:04d}-{month + 1:02d}-01"
 
 def _get_int(name: str, default: int) -> int:
+    """Get an integer environment variable, or raise an error if it's not a valid integer."""
     val = os.getenv(name, str(default))
     try:
         return int(val)
