@@ -1,3 +1,4 @@
+# syntax=docker/dockerfile:1.7
 # Stage 1 — builder
 FROM python:3.14-slim AS builder
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /bin/
@@ -11,7 +12,10 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 # Stage 2 — runtime
 FROM python:3.14-slim
 WORKDIR /app
+RUN useradd --create-home --uid 10001 appuser
 COPY --from=builder /app/.venv /app/.venv
 COPY src/ ./src/
+RUN chown -R appuser:appuser /app
+USER appuser
 ENV PATH="/app/.venv/bin:$PATH"
 CMD ["python", "src/main.py"]
