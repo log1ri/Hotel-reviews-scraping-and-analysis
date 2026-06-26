@@ -1,0 +1,16 @@
+.venv/
+.env
+.env.example
+__pycache__/
+*.ipynb
+
+.git/
+.gitignore
+
+hotel-reviews-*.json
+HotelReview.xlsx
+
+README.md
+ROADMAP.md
+CLAUDE.md
+AGENTS.md
