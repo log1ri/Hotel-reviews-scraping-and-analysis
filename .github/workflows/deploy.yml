@@ -4,6 +4,13 @@ on:
   push:
     branches:
       - main
+    paths-ignore: 
+      - '**.md'           
+      - '.env.example'  
+      - '.gitignore'
+      - '*.ipynb'
+      - 'LICENSE'
+      - 'docs/**'
 
 env:
   PROJECT_ID: hotel-reviews-500211

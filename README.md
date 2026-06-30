@@ -4,6 +4,16 @@ An automated, **free-tier** cloud data pipeline that scrapes TripAdvisor hotel r
 loads them into **BigQuery**, and visualizes trends in **Looker Studio**. Built to run
 itself on a monthly schedule with zero manual steps.
 
+## 📊 Live Dashboard
+
+[**View the live Looker Studio dashboard →**](https://lookerstudio.google.com/reporting/c6da7188-5769-4e6f-a699-47b45d2d4ef6)
+
+Tracks 4 competing luxury hotels in Bangkok's **Sathorn** district — average rating, rating
+distribution, monthly trend per hotel, and the latest low-rated reviews. Reads BigQuery
+directly and refreshes automatically each month.
+
+![Hotel Reviews Dashboard](docs/dashboard.png)
+
 ## Architecture
 
 ```
@@ -63,7 +73,7 @@ Copy `.env.example` to `.env` and fill in:
 | `API_TOKEN` | ✅ | — | Apify API token |
 | `HOTEL_URLS` | ✅ | — | Comma-separated TripAdvisor hotel URLs |
 | `RATING_SET` | | `5,4,3,2,1` | Ratings to include |
-| `START_DATE` | | first of month, `LOOKBACK_MONTHS` ago | Override the lookback start |
+| `POST_DATE` | | first of month, `LOOKBACK_MONTHS` ago | Override the lookback start (filters by review post date) |
 | `LOOKBACK_MONTHS` | | `2` | Rolling window size |
 | `MAX_ITEMS` | | `1000` | Max reviews per hotel (caps Apify cost) |
 | `LANGUAGE` | | `en` | Review language |
@@ -110,6 +120,17 @@ gcloud run jobs executions list --job=hotel-reviews-pipeline --region=asia-south
 
 On Cloud Run the service account is attached directly (no key file); `API_TOKEN` is read
 from Secret Manager and other config from job env vars.
+
+### Service accounts (least-privilege)
+
+Each step runs as its own service account with only the permissions it needs — no shared
+broad-access identity:
+
+| Service account | Roles | Used by |
+|-----------------|-------|---------|
+| `hotel-reviews-pipeline` | BigQuery User + Data Editor, Secret Accessor | Cloud Run Job at runtime (scrape → load) |
+| `github-deployer` | Artifact Registry Writer, Run Admin, Service Account User | GitHub Actions CI/CD (build → push → deploy) |
+| `scheduler-invoker` | Run Invoker | Cloud Scheduler (triggers the monthly job) |
 
 ## Cost control (stays free)
 
